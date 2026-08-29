@@ -1,0 +1,8 @@
+[package]
+name = "csv-tsv-converter"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "csv-tsv-converter"
+path = "src/main.rs"
