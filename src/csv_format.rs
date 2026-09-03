@@ -153,3 +153,127 @@ fn write_field<W: Write>(writer: &mut W, field: &str) -> io::Result<()> {
     writer.write_all(field[start..].as_bytes())?;
     writer.write_all(b"\"")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn read_all(input: &str) -> Vec<Vec<String>> {
+        let mut reader = CsvReader::new(input.as_bytes());
+        let mut records = Vec::new();
+        let mut fields = Vec::new();
+        while reader.read_record(&mut fields).unwrap() {
+            records.push(fields.clone());
+        }
+        records
+    }
+
+    fn write_to_string(fields: &[&str]) -> String {
+        let owned: Vec<String> = fields.iter().map(|s| s.to_string()).collect();
+        let mut out = Vec::new();
+        write_record(&mut out, &owned).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn empty_input_has_no_records() {
+        assert_eq!(read_all(""), Vec::<Vec<String>>::new());
+    }
+
+    #[test]
+    fn plain_fields_split_on_comma() {
+        assert_eq!(read_all("a,b,c\n"), vec![vec!["a", "b", "c"]]);
+    }
+
+    #[test]
+    fn trailing_record_without_final_newline() {
+        assert_eq!(read_all("a,b,c"), vec![vec!["a", "b", "c"]]);
+    }
+
+    #[test]
+    fn multiple_records() {
+        assert_eq!(
+            read_all("a,b\nc,d\n"),
+            vec![vec!["a", "b"], vec!["c", "d"]]
+        );
+    }
+
+    #[test]
+    fn quoted_field_can_contain_comma() {
+        assert_eq!(
+            read_all("\"a,b\",c\n"),
+            vec![vec!["a,b", "c"]]
+        );
+    }
+
+    #[test]
+    fn quoted_field_can_contain_newline() {
+        assert_eq!(
+            read_all("\"a\nb\",c\n"),
+            vec![vec!["a\nb", "c"]]
+        );
+    }
+
+    #[test]
+    fn doubled_quote_in_quoted_field_is_literal_quote() {
+        assert_eq!(
+            read_all("\"say \"\"hi\"\"\"\n"),
+            vec![vec!["say \"hi\""]]
+        );
+    }
+
+    #[test]
+    fn quote_mid_field_is_kept_literally() {
+        // A '"' that doesn't start a field is not treated as CSV quoting.
+        assert_eq!(read_all("ab\"cd,ef\n"), vec![vec!["ab\"cd", "ef"]]);
+    }
+
+    #[test]
+    fn crlf_line_ending_is_stripped() {
+        assert_eq!(read_all("a,b\r\nc,d\r\n"), vec![vec!["a", "b"], vec!["c", "d"]]);
+    }
+
+    #[test]
+    fn bare_cr_line_ending_is_stripped() {
+        assert_eq!(read_all("a,b\rc,d\r"), vec![vec!["a", "b"], vec!["c", "d"]]);
+    }
+
+    #[test]
+    fn crlf_inside_quotes_is_preserved() {
+        assert_eq!(read_all("\"a\r\nb\"\n"), vec![vec!["a\r\nb"]]);
+    }
+
+    #[test]
+    fn empty_quoted_field() {
+        assert_eq!(read_all("\"\",b\n"), vec![vec!["", "b"]]);
+    }
+
+    #[test]
+    fn write_field_without_special_chars_is_unquoted() {
+        assert_eq!(write_to_string(&["a", "b"]), "a,b\n");
+    }
+
+    #[test]
+    fn write_field_with_comma_is_quoted() {
+        assert_eq!(write_to_string(&["a,b", "c"]), "\"a,b\",c\n");
+    }
+
+    #[test]
+    fn write_field_with_quote_doubles_it() {
+        assert_eq!(write_to_string(&["say \"hi\""]), "\"say \"\"hi\"\"\"\n");
+    }
+
+    #[test]
+    fn write_field_with_newline_is_quoted() {
+        assert_eq!(write_to_string(&["a\nb"]), "\"a\nb\"\n");
+    }
+
+    #[test]
+    fn round_trip_through_reader_and_writer() {
+        let original = vec!["plain".to_string(), "has,comma".to_string(), "has\"quote".to_string()];
+        let mut out = Vec::new();
+        write_record(&mut out, &original).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(read_all(&text), vec![original]);
+    }
+}

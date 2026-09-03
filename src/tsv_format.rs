@@ -60,3 +60,50 @@ pub fn unescape_field(field: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_field_is_unchanged() {
+        assert_eq!(escape_field("hello"), "hello");
+        assert_eq!(unescape_field("hello"), "hello");
+    }
+
+    #[test]
+    fn escapes_tab_newline_cr_and_backslash() {
+        assert_eq!(escape_field("a\tb\nc\rd\\e"), "a\\tb\\nc\\rd\\\\e");
+    }
+
+    #[test]
+    fn unescapes_tab_newline_cr_and_backslash() {
+        assert_eq!(unescape_field("a\\tb\\nc\\rd\\\\e"), "a\tb\nc\rd\\e");
+    }
+
+    #[test]
+    fn unknown_escape_sequence_is_kept_literally() {
+        // A backslash followed by something we don't recognize is not one
+        // of our escapes, so both characters survive as written.
+        assert_eq!(unescape_field("a\\xb"), "a\\xb");
+    }
+
+    #[test]
+    fn trailing_backslash_with_nothing_after_it_survives() {
+        assert_eq!(unescape_field("ab\\"), "ab\\");
+    }
+
+    #[test]
+    fn round_trips_through_escape_and_unescape() {
+        let original = "field\twith\ttabs\nand\nnewlines\rand\\backslashes";
+        assert_eq!(unescape_field(&escape_field(original)), original);
+    }
+
+    #[test]
+    fn write_record_joins_fields_with_tabs_and_escapes_them() {
+        let fields = vec!["a\tb".to_string(), "plain".to_string(), "c\\d".to_string()];
+        let mut out = Vec::new();
+        write_record(&mut out, &fields).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "a\\tb\tplain\tc\\\\d\n");
+    }
+}
