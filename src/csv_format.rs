@@ -4,11 +4,13 @@ use std::io::{self, Read, Write};
 ///
 /// Only the current record's bytes are ever held in memory, so this is
 /// safe to point at an input of any size. It follows the common RFC 4180
-/// conventions: fields are separated by commas, a field can be wrapped in
-/// double quotes to contain commas or newlines, and a doubled quote inside
-/// a quoted field means a literal quote.
+/// conventions: fields are separated by a delimiter (comma by default,
+/// but any single ASCII byte works), a field can be wrapped in double
+/// quotes to contain the delimiter or a newline, and a doubled quote
+/// inside a quoted field means a literal quote.
 pub struct CsvReader<R: Read> {
     bytes: io::Bytes<R>,
+    delimiter: u8,
     // Deciding whether a quote closes a field sometimes takes a
     // look at the following byte; if that byte turns out to start
     // the next token, it goes here instead of being read again.
@@ -16,8 +18,8 @@ pub struct CsvReader<R: Read> {
 }
 
 impl<R: Read> CsvReader<R> {
-    pub fn new(reader: R) -> Self {
-        CsvReader { bytes: reader.bytes(), pending: None }
+    pub fn new(reader: R, delimiter: u8) -> Self {
+        CsvReader { bytes: reader.bytes(), delimiter, pending: None }
     }
 
     fn next_byte(&mut self) -> io::Result<Option<u8>> {
@@ -62,7 +64,7 @@ impl<R: Read> CsvReader<R> {
                 // only way to tell is to look at the byte right after it.
                 match self.next_byte()? {
                     Some(b'"') => field.push(b'"'),
-                    Some(b',') => {
+                    Some(next) if next == self.delimiter => {
                         in_quotes = false;
                         fields.push(bytes_to_string(std::mem::take(&mut field)));
                         field_was_quoted = false;
@@ -91,7 +93,7 @@ impl<R: Read> CsvReader<R> {
                         in_quotes = true;
                         field_was_quoted = true;
                     }
-                    b',' => {
+                    other if other == self.delimiter => {
                         fields.push(bytes_to_string(std::mem::take(&mut field)));
                         field_was_quoted = false;
                     }
@@ -128,18 +130,21 @@ fn bytes_to_string(bytes: Vec<u8>) -> String {
     String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(&e.into_bytes()).into_owned())
 }
 
-pub fn write_record<W: Write>(writer: &mut W, fields: &[String]) -> io::Result<()> {
+pub fn write_record<W: Write>(writer: &mut W, fields: &[String], delimiter: u8) -> io::Result<()> {
     for (i, field) in fields.iter().enumerate() {
         if i > 0 {
-            writer.write_all(b",")?;
+            writer.write_all(&[delimiter])?;
         }
-        write_field(writer, field)?;
+        write_field(writer, field, delimiter)?;
     }
     writer.write_all(b"\n")
 }
 
-fn write_field<W: Write>(writer: &mut W, field: &str) -> io::Result<()> {
-    let needs_quoting = field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r');
+fn write_field<W: Write>(writer: &mut W, field: &str, delimiter: u8) -> io::Result<()> {
+    // `delimiter` is validated at the CLI boundary to be a single ASCII
+    // byte, so this cast back to `char` is exact.
+    let delimiter = delimiter as char;
+    let needs_quoting = field.contains(delimiter) || field.contains('"') || field.contains('\n') || field.contains('\r');
     if !needs_quoting {
         return writer.write_all(field.as_bytes());
     }
@@ -159,7 +164,11 @@ mod tests {
     use super::*;
 
     fn read_all(input: &str) -> Vec<Vec<String>> {
-        let mut reader = CsvReader::new(input.as_bytes());
+        read_all_with_delimiter(input, b',')
+    }
+
+    fn read_all_with_delimiter(input: &str, delimiter: u8) -> Vec<Vec<String>> {
+        let mut reader = CsvReader::new(input.as_bytes(), delimiter);
         let mut records = Vec::new();
         let mut fields = Vec::new();
         while reader.read_record(&mut fields).unwrap() {
@@ -169,9 +178,13 @@ mod tests {
     }
 
     fn write_to_string(fields: &[&str]) -> String {
+        write_to_string_with_delimiter(fields, b',')
+    }
+
+    fn write_to_string_with_delimiter(fields: &[&str], delimiter: u8) -> String {
         let owned: Vec<String> = fields.iter().map(|s| s.to_string()).collect();
         let mut out = Vec::new();
-        write_record(&mut out, &owned).unwrap();
+        write_record(&mut out, &owned, delimiter).unwrap();
         String::from_utf8(out).unwrap()
     }
 
@@ -272,8 +285,49 @@ mod tests {
     fn round_trip_through_reader_and_writer() {
         let original = vec!["plain".to_string(), "has,comma".to_string(), "has\"quote".to_string()];
         let mut out = Vec::new();
-        write_record(&mut out, &original).unwrap();
+        write_record(&mut out, &original, b',').unwrap();
         let text = String::from_utf8(out).unwrap();
         assert_eq!(read_all(&text), vec![original]);
+    }
+
+    #[test]
+    fn custom_delimiter_splits_fields() {
+        assert_eq!(
+            read_all_with_delimiter("a;b;c\n", b';'),
+            vec![vec!["a", "b", "c"]]
+        );
+    }
+
+    #[test]
+    fn comma_is_not_special_with_a_custom_delimiter() {
+        assert_eq!(
+            read_all_with_delimiter("a,b;c\n", b';'),
+            vec![vec!["a,b", "c"]]
+        );
+    }
+
+    #[test]
+    fn quoted_field_can_contain_a_custom_delimiter() {
+        assert_eq!(
+            read_all_with_delimiter("\"a;b\";c\n", b';'),
+            vec![vec!["a;b", "c"]]
+        );
+    }
+
+    #[test]
+    fn write_field_quotes_on_custom_delimiter() {
+        assert_eq!(
+            write_to_string_with_delimiter(&["a;b", "c"], b';'),
+            "\"a;b\";c\n"
+        );
+    }
+
+    #[test]
+    fn round_trip_with_custom_delimiter() {
+        let original = vec!["plain".to_string(), "has;semicolon".to_string(), "has,comma".to_string()];
+        let mut out = Vec::new();
+        write_record(&mut out, &original, b';').unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(read_all_with_delimiter(&text, b';'), vec![original]);
     }
 }

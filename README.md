@@ -16,11 +16,24 @@ cargo build --release
 ## Usage
 
 ```
-csv-tsv-converter <csv2tsv|tsv2csv> <input> [output]
+csv-tsv-converter [-d|--delimiter <char>] <csv2tsv|tsv2csv> <input> [output]
 ```
 
 Use `-` for input or output to mean stdin/stdout. If output is omitted it
 defaults to stdout.
+
+By default the CSV side is comma-delimited, as usual. Pass `-d` or
+`--delimiter` with a single character to use something else - semicolon
+and pipe-delimited exports are common enough to run into. `\t` is accepted
+as shorthand for a literal tab, since typing one on a command line is
+awkward:
+
+```
+$ csv-tsv-converter -d ';' csv2tsv european-export.csv out.tsv
+```
+
+The delimiter only affects the CSV side; the TSV dialect always uses tabs
+(see below).
 
 ```
 $ cat people.csv
@@ -49,9 +62,10 @@ curl -s https://example.com/export.csv | csv-tsv-converter csv2tsv - out.tsv
 ## Format notes
 
 CSV parsing follows the usual RFC 4180 conventions: fields are separated
-by commas, a field can be wrapped in double quotes to hold a comma or a
-newline, and a doubled quote (`""`) inside a quoted field means a literal
-quote character. Both `\n` and `\r\n` line endings are accepted.
+by a delimiter (comma by default, configurable with `--delimiter`), a
+field can be wrapped in double quotes to hold the delimiter or a newline,
+and a doubled quote (`""`) inside a quoted field means a literal quote
+character. Both `\n` and `\r\n` line endings are accepted.
 
 The TSV side has no quoting mechanism at all - a tab always ends a field
 and a newline always ends a record, so a record is always exactly one
