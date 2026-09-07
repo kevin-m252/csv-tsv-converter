@@ -16,11 +16,16 @@ cargo build --release
 ## Usage
 
 ```
-csv-tsv-converter [-d|--delimiter <char>] <csv2tsv|tsv2csv> <input> [output]
+csv-tsv-converter [-d|--delimiter <char>] [--header] <csv2tsv|tsv2csv> <input> [output]
 ```
 
 Use `-` for input or output to mean stdin/stdout. If output is omitted it
 defaults to stdout.
+
+Pass `--header` to treat the first row as a header and fail the conversion
+as soon as a later row has a different number of columns. Without it,
+ragged rows are passed through as-is - the same as most CSV tools default
+to.
 
 By default the CSV side is comma-delimited, as usual. Pass `-d` or
 `--delimiter` with a single character to use something else - semicolon
