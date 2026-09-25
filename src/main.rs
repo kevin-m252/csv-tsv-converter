@@ -107,14 +107,29 @@ fn run(mode: &str, input_path: &str, output_path: &str, delimiter: u8, validate_
     writer.flush()
 }
 
+/// Excel and a few other tools write a UTF-8 byte-order mark at the start
+/// of a CSV export even though UTF-8 doesn't need one. Left alone it ends
+/// up glued to the first field's contents (`\u{feff}name` instead of
+/// `name`), so it's stripped before either format reader sees the stream.
+/// A `fill_buf`/`consume` pair is enough to drop it without needing to
+/// seek, which also means it works on stdin.
+fn strip_bom<R: BufRead>(reader: &mut R) -> io::Result<()> {
+    const BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
+    if reader.fill_buf()?.starts_with(&BOM) {
+        reader.consume(BOM.len());
+    }
+    Ok(())
+}
+
 /// Streams the input one CSV record at a time; at no point is more than a
 /// single record held in memory, regardless of how large the file is.
 fn convert_csv_to_tsv<R: Read, W: Write>(
-    reader: BufReader<R>,
+    mut reader: BufReader<R>,
     writer: &mut W,
     delimiter: u8,
     validate_header: bool,
 ) -> io::Result<()> {
+    strip_bom(&mut reader)?;
     let mut csv_reader = csv_format::CsvReader::new(reader, delimiter);
     let mut fields: Vec<String> = Vec::new();
     let mut expected_columns: Option<usize> = None;
@@ -137,6 +152,7 @@ fn convert_tsv_to_csv<R: Read, W: Write>(
     delimiter: u8,
     validate_header: bool,
 ) -> io::Result<()> {
+    strip_bom(&mut reader)?;
     let mut line = String::new();
     let mut fields: Vec<String> = Vec::new();
     let mut expected_columns: Option<usize> = None;
@@ -244,4 +260,23 @@ mod tests {
         let err = tsv_to_csv("a\tb\tc\n1\t2\n", b',', true).unwrap_err();
         assert!(err.to_string().contains("row 2"));
     }
+
+    #[test]
+    fn leading_bom_is_stripped_from_csv_input() {
+        let input = "\u{feff}a,b,c\n1,2,3\n";
+        assert_eq!(csv_to_tsv(input, b',', false).unwrap(), "a\tb\tc\n1\t2\t3\n");
+    }
+
+    #[test]
+    fn leading_bom_is_stripped_from_tsv_input() {
+        let input = "\u{feff}a\tb\tc\n1\t2\t3\n";
+        assert_eq!(tsv_to_csv(input, b',', false).unwrap(), "a,b,c\n1,2,3\n");
+    }
+
+    #[test]
+    fn bom_only_input_produces_no_records() {
+        assert_eq!(csv_to_tsv("\u{feff}", b',', false).unwrap(), "");
+        assert_eq!(tsv_to_csv("\u{feff}", b',', false).unwrap(), "");
+    }
+
 }

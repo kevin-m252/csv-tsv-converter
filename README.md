@@ -80,6 +80,10 @@ out and unescaped on the way back in. This is the same convention
 `mysqldump` and PostgreSQL's `COPY ... TO` use for tab-delimited output,
 so files from either of those should round-trip cleanly.
 
+A leading UTF-8 byte-order mark, which Excel likes to add to CSV exports,
+is stripped from either input format before parsing starts. Output never
+has one written back, regardless of whether the input did.
+
 ## How the streaming works
 
 `csv2tsv` reads the input byte by byte through a small state machine that
