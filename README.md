@@ -93,6 +93,18 @@ since a TSV record here is always a single line by construction. Either
 way, memory use stays proportional to the size of the widest single
 record, not the size of the file.
 
+## Benchmark
+
+```
+cargo run --release --example bench [row-count]
+```
+
+This generates a synthetic CSV file in your temp directory (one million
+rows by default) and times both conversion directions against it through
+the same file-based path the CLI itself uses, then deletes the generated
+files when it's done. Useful for checking that a change to the reader or
+writer hasn't quietly made things slower.
+
 ## License
 
 MIT, see LICENSE.

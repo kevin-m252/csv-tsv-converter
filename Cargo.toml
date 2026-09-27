@@ -3,6 +3,10 @@ name = "csv-tsv-converter"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "csv_tsv_converter"
+path = "src/lib.rs"
+
 [[bin]]
 name = "csv-tsv-converter"
 path = "src/main.rs"
